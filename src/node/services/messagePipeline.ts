@@ -31,6 +31,7 @@ import {
 import { normalizeLegacyToolSearchMessages } from "@/common/utils/tools/toolCatalog";
 import { applyCacheControl, type AnthropicCacheTtl } from "@/common/utils/ai/cacheStrategy";
 import { log } from "./log";
+import { applyWanxiangshuPreProviderTransforms } from "@/node/services/wanxiangshuPreProvider";
 
 /** Options for the full message preparation pipeline. */
 export interface PrepareMessagesOptions {
@@ -138,9 +139,16 @@ export async function prepareMessagesForProvider(
     abortSignal,
   });
 
+  const messagesAfterWanxiangshuTransform = (await applyWanxiangshuPreProviderTransforms({
+    workspacePath,
+    workspaceId,
+    effectiveAgentId,
+    messages: messagesWithFileAtMentions,
+  })) as MuxMessage[];
+
   // Apply centralized tool-output redaction BEFORE converting to provider ModelMessages.
   // Keeps the persisted/UI history intact while trimming heavy fields for the request.
-  const redactedForProvider = applyToolOutputRedaction(messagesWithFileAtMentions);
+  const redactedForProvider = applyToolOutputRedaction(messagesAfterWanxiangshuTransform);
   log.debug_obj(`${workspaceId}/2a_redacted_messages.json`, redactedForProvider);
 
   // Sanitize tool inputs to ensure they are valid objects (not strings or arrays).
@@ -191,13 +199,13 @@ export async function prepareMessagesForProvider(
   log.debug_obj(`${workspaceId}/2_model_messages.json`, modelMessages);
 
   // Apply ModelMessage transforms based on provider requirements
-  const transformedMessages = transformModelMessages(modelMessages, providerForMessages, {
+  const transformedModelMessages = transformModelMessages(modelMessages, providerForMessages, {
     anthropicThinkingEnabled:
       providerForMessages === "anthropic" && effectiveThinkingLevel !== "off",
   });
 
   // Apply cache control for Anthropic models AFTER transformation
-  const finalMessages = applyCacheControl(transformedMessages, modelString, anthropicCacheTtl);
+  const finalMessages = applyCacheControl(transformedModelMessages, modelString, anthropicCacheTtl);
 
   log.debug_obj(`${workspaceId}/3_final_messages.json`, finalMessages);
 

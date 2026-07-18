@@ -17,14 +17,25 @@ import { getErrorMessage } from "@/common/utils/errors";
 
 export class MCPConfigService {
   private readonly config: Config;
+  private readonly defaultServers: Readonly<Record<string, string>>;
 
-  constructor(config: Config) {
+  constructor(config: Config, defaultServers: Readonly<Record<string, string>> = {}) {
     assert(
       typeof config.rootDir === "string" && config.rootDir.trim().length > 0,
       "MCPConfigService: config.rootDir must be a non-empty string"
     );
 
     this.config = config;
+    this.defaultServers = defaultServers;
+  }
+
+  private getDefaultServers(): Record<string, MCPServerInfo> {
+    return Object.fromEntries(
+      Object.entries(this.defaultServers).map(([name, command]) => [
+        name,
+        { transport: "stdio", command, disabled: false } satisfies MCPServerInfo,
+      ])
+    );
   }
 
   private getGlobalConfigPath(): string {
@@ -156,6 +167,16 @@ export class MCPConfigService {
   }
 
   private async getGlobalConfig(): Promise<MCPConfig> {
+    const config = await this.getSavedGlobalConfig();
+    return {
+      servers: {
+        ...this.getDefaultServers(),
+        ...config.servers,
+      },
+    };
+  }
+
+  private async getSavedGlobalConfig(): Promise<MCPConfig> {
     return this.readConfigFile(this.getGlobalConfigPath());
   }
 
@@ -266,7 +287,7 @@ export class MCPConfigService {
       }
     }
 
-    const cfg = await this.getGlobalConfig();
+    const cfg = await this.getSavedGlobalConfig();
     const existing = cfg.servers[name];
 
     const base = {
@@ -300,8 +321,8 @@ export class MCPConfigService {
   }
 
   async setServerEnabled(name: string, enabled: boolean): Promise<Result<void>> {
-    const cfg = await this.getGlobalConfig();
-    const entry = cfg.servers[name];
+    const cfg = await this.getSavedGlobalConfig();
+    const entry = cfg.servers[name] ?? this.getDefaultServers()[name];
     if (!entry) {
       return Err(`Server ${name} not found`);
     }
@@ -316,11 +337,16 @@ export class MCPConfigService {
   }
 
   async removeServer(name: string): Promise<Result<void>> {
-    const cfg = await this.getGlobalConfig();
-    if (!cfg.servers[name]) {
+    const cfg = await this.getSavedGlobalConfig();
+    const defaultEntry = this.getDefaultServers()[name];
+    if (!cfg.servers[name] && !defaultEntry) {
       return Err(`Server ${name} not found`);
     }
-    delete cfg.servers[name];
+    if (defaultEntry) {
+      cfg.servers[name] = { ...defaultEntry, disabled: true };
+    } else {
+      delete cfg.servers[name];
+    }
     try {
       await this.saveGlobalConfig(cfg);
       return Ok(undefined);
@@ -331,8 +357,8 @@ export class MCPConfigService {
   }
 
   async setToolAllowlist(name: string, toolAllowlist: string[]): Promise<Result<void>> {
-    const cfg = await this.getGlobalConfig();
-    const entry = cfg.servers[name];
+    const cfg = await this.getSavedGlobalConfig();
+    const entry = cfg.servers[name] ?? this.getDefaultServers()[name];
     if (!entry) {
       return Err(`Server ${name} not found`);
     }

@@ -60,6 +60,7 @@ import {
 } from "@/common/utils/tools/toolDefinitions";
 import { sanitizeMCPToolsForOpenAI } from "@/common/utils/tools/schemaSanitizer";
 import type { ToolSearchRuntime } from "@/common/utils/tools/toolCatalog";
+import { integrateWanxiangshuTools } from "@/node/services/wanxiangshuBinding";
 
 import type { Result } from "@/common/types/result";
 import type { Runtime } from "@/node/runtime/Runtime";
@@ -171,6 +172,9 @@ export interface ToolConfiguration {
   workspaceSessionDir?: string;
   /** Workspace ID for tracking background processes and plan storage */
   workspaceId?: string;
+  /** Session identity exposed to plugin integrations using either casing. */
+  sessionID?: string;
+  sessionId?: string;
   /** Pre-resolved mux-managed resource scope (global ~/.mux vs project root). */
   muxScope?: MuxToolScope;
   /** Optional skill roots override for tests and isolated workflow resolution. */
@@ -271,6 +275,9 @@ export interface ToolConfiguration {
     toolSearch?: boolean;
     /** claude-skills-compat: discover skills from .claude/skills and ~/.claude/skills (read-only). */
     claudeSkillsCompat?: boolean;
+    subagentRole?: string;
+    toolPolicy?: { disabledTools?: string[] };
+    [key: string]: unknown;
   };
   /** Available sub-agents for the task tool description (dynamic context) */
   availableSubagents?: AgentDefinitionDescriptor[];
@@ -754,6 +761,8 @@ export async function getToolsForModel(
   for (const toolName of Object.keys(mcpTools ?? {})) {
     allowlistedToolNames.add(toolName);
   }
+
+  integrateWanxiangshuTools(allTools, allowlistedToolNames, config, workspaceId);
 
   allTools = Object.fromEntries(
     Object.entries(allTools).filter(([toolName]) => allowlistedToolNames.has(toolName))

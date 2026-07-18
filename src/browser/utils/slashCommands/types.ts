@@ -12,6 +12,7 @@
 import type { ExperimentId } from "@/common/constants/experiments";
 import type { AgentSkillDescriptor } from "@/common/types/agentSkill";
 import type { ParsedThinkingInput } from "@/common/types/thinking";
+import type { WorkflowScriptDescriptor } from "@/common/types/workflow";
 
 export type ParsedCommand =
   | { type: "model-set"; modelString: string }
@@ -96,12 +97,14 @@ export interface SlashSuggestion {
   id: string;
   display: string;
   description: string;
-  kind?: "command" | "skill" | "model";
+  kind?: "command" | "skill" | "workflow" | "model";
   replacement: string;
 }
 
 export interface SlashSuggestionContext extends SlashCommandVisibilityContext {
   agentSkills?: AgentSkillDescriptor[];
+  workflows?: readonly WorkflowScriptDescriptor[];
+  pluginCommands?: readonly { readonly key: string; readonly description: string; readonly inputHint?: string }[];
 }
 
 export interface SuggestionDefinition {

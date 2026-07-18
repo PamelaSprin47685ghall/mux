@@ -41,6 +41,7 @@ import {
   getFollowUpContentText,
 } from "@/browser/utils/compaction/format";
 import type { ParsedCommand } from "@/browser/utils/slashCommands/types";
+import { SLASH_COMMAND_DEFINITION_MAP } from "@/browser/utils/slashCommands/registry";
 import { type GoalDefaults } from "@/constants/goals";
 import {
   hasBudgetedResumableGoal,
@@ -897,6 +898,76 @@ export async function processSlashCommand(
         trackCommandUsed("btw");
         return { clearInput: true, toastShown: false };
       }
+    }
+  }
+
+  if (
+    parsed.type === "unknown-command" &&
+    context.variant === "workspace" &&
+    !SLASH_COMMAND_DEFINITION_MAP.has(parsed.command)
+  ) {
+    const activeClient = requireClient();
+    if (!activeClient) {
+      return { clearInput: false, toastShown: true };
+    }
+    if (!context.workspaceId) {
+      setToast({
+        id: Date.now().toString(),
+        type: "error",
+        message: "No workspace selected",
+      });
+      return { clearInput: false, toastShown: true };
+    }
+
+    const rawInput = context.getInput?.() ?? context.rawInput ?? "";
+    const prefix = `/${parsed.command}`;
+    const args = rawInput.trim().startsWith(prefix)
+      ? rawInput.trim().slice(prefix.length).trimStart()
+      : (parsed.subcommand ?? "");
+    const parentRuntimeMuxEnv =
+      context.sendMessageOptions.model?.trim() || context.sendMessageOptions.thinkingLevel != null
+        ? {
+            ...(context.sendMessageOptions.model?.trim()
+              ? { MUX_MODEL_STRING: context.sendMessageOptions.model.trim() }
+              : {}),
+            ...(context.sendMessageOptions.thinkingLevel != null
+              ? { MUX_THINKING_LEVEL: String(context.sendMessageOptions.thinkingLevel) }
+              : {}),
+          }
+        : undefined;
+
+    try {
+      const message = await activeClient.pluginCommands.execute({
+        command: parsed.command,
+        workspaceId: context.workspaceId,
+        args,
+        ...(parentRuntimeMuxEnv ? { parentRuntimeMuxEnv } : {}),
+      });
+
+      if (message != null) {
+        setInput("");
+        const sendResult = await activeClient.workspace.sendMessage({
+          workspaceId: context.workspaceId,
+          message,
+          options: context.sendMessageOptions,
+        });
+        if (!sendResult.success) {
+          setToast({
+            id: Date.now().toString(),
+            type: "error",
+            message: "Plugin command failed",
+          });
+          return { clearInput: false, toastShown: true };
+        }
+        return { clearInput: true, toastShown: false };
+      }
+    } catch (error) {
+      setToast({
+        id: Date.now().toString(),
+        type: "error",
+        message: error instanceof Error ? error.message : "Plugin command failed",
+      });
+      return { clearInput: false, toastShown: true };
     }
   }
 

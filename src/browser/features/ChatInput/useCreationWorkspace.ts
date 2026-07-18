@@ -66,7 +66,10 @@ import { workspaceStore } from "@/browser/stores/WorkspaceStore";
 import { WORKSPACE_DEFAULTS } from "@/constants/workspaceDefaults";
 
 export type CreationSendResult = { success: true } | { success: false; error?: SendMessageError };
-export type CreationInitialSlashCommand = Extract<ParsedCommand, { type: "goal-set" }>;
+export type CreationInitialSlashCommand = Extract<
+  ParsedCommand,
+  { type: "goal-set" } | { type: "workflow-run" } | { type: "unknown-command" }
+>;
 
 interface UseCreationWorkspaceOptions {
   kind?: "scratch";
@@ -461,6 +464,8 @@ export function useCreationWorkspace({
         // project/global/default resolution chain as the creation UI.
         const sendMessageOptions = {
           ...getSendOptionsFromStorage(projectScopeId),
+          model: settings.model,
+          thinkingLevel: settings.thinkingLevel,
           agentId: settings.agentId,
         };
         // Use normalized override if provided, otherwise fall back to already-normalized storage model
@@ -636,6 +641,7 @@ export function useCreationWorkspace({
             rawInput: messageText,
             dynamicWorkflowsEnabled,
             sendMessageOptions,
+            getInput: () => messageText,
             setInput: () => undefined,
             setAttachments: () => undefined,
             setSendingState: () => undefined,

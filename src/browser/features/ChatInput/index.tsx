@@ -206,6 +206,8 @@ import { normalizeAgentId } from "@/common/utils/agentIds";
 import { isGoalRunning } from "@/common/types/goal";
 import { appendStagedAttachmentNotice, getStagedAttachments } from "./stagedAttachments";
 import { WORKSPACE_DEFAULTS } from "@/constants/workspaceDefaults";
+import type { SlashSuggestionContext } from "@/browser/utils/slashCommands/types";
+import type { WorkflowScriptDescriptor } from "@/common/types/workflow";
 
 // localStorage quotas are environment-dependent and relatively small.
 // Be conservative here so we can warn the user before writes start failing.
@@ -414,7 +416,11 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
   const [showSymbolSuggestions, setShowSymbolSuggestions] = useState(false);
   const [symbolSuggestions, setSymbolSuggestions] = useState<SlashSuggestion[]>([]);
   const lastSymbolQueryRef = useRef<string>("");
+  const [workflowDefinitionDescriptors, setWorkflowDefinitionDescriptors] = useState<
+    WorkflowScriptDescriptor[]
+  >([]);
   const [agentSkillDescriptors, setAgentSkillDescriptors] = useState<AgentSkillDescriptor[]>([]);
+  const [pluginCommands, setPluginCommands] = useState<NonNullable<SlashSuggestionContext["pluginCommands"]>>([]);
   const [toast, setToast] = useState<Toast | null>(null);
   // State for destructive command confirmation modal (currently only /clear).
   const [pendingDestructiveCommand, setPendingDestructiveCommand] = useState(false);
@@ -1528,6 +1534,8 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
   useLayoutEffect(() => {
     const suggestions = getSlashCommandSuggestions(input, {
       agentSkills: agentSkillDescriptors,
+      pluginCommands,
+      workflows: dynamicWorkflowsExperimentEnabled ? workflowDefinitionDescriptors : [],
       variant,
       isExperimentEnabled: (experimentId) =>
         resolveSlashCommandExperimentValue(experimentId, {
@@ -1542,6 +1550,8 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
   }, [
     input,
     agentSkillDescriptors,
+    pluginCommands,
+    workflowDefinitionDescriptors,
     variant,
     workspaceHeartbeatsExperimentEnabled,
     dynamicWorkflowsExperimentEnabled,
@@ -1591,12 +1601,16 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
     const requestId = ++workflowsRequestIdRef.current;
 
     const loadWorkflows = async () => {
-      if (!api || !dynamicWorkflowsExperimentEnabled) {
+      if (!api || variant !== "workspace" || workspaceId == null || !dynamicWorkflowsExperimentEnabled) {
+        if (isMounted && workflowsRequestIdRef.current === requestId) {
+          setWorkflowDefinitionDescriptors([]);
+        }
         return;
       }
 
       try {
-        const discoveryWorkspaceId = variant === "workspace" && workspaceId ? workspaceId : null;
+        const availableWorkflows = await api.workflows.listScripts({ workspaceId });
+        const discoveryWorkspaceId = workspaceId;
         const runs =
           discoveryWorkspaceId != null && isTranscriptCaughtUp
             ? await api.workflows.listRuns({ workspaceId: discoveryWorkspaceId })
@@ -1604,9 +1618,11 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
         if (!isMounted || workflowsRequestIdRef.current !== requestId) {
           return;
         }
-        if (discoveryWorkspaceId == null) {
-          return;
-        }
+        setWorkflowDefinitionDescriptors(
+          Array.isArray(availableWorkflows)
+            ? availableWorkflows.map((workflow) => workflow.descriptor)
+            : []
+        );
         const muxMessages = store.getWorkspaceState(discoveryWorkspaceId).muxMessages;
         for (const run of runs) {
           const projection = getWorkflowRunCardProjection(muxMessages, run);
@@ -1623,7 +1639,11 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
           });
         }
       } catch (error) {
-        console.error("Failed to project workflow run cards:", error);
+        console.error("Failed to load workflow definitions:", error);
+        if (!isMounted || workflowsRequestIdRef.current !== requestId) {
+          return;
+        }
+        setWorkflowDefinitionDescriptors([]);
       }
     };
 
@@ -1636,11 +1656,35 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
     api,
     variant,
     workspaceId,
-    atMentionProjectPath,
     dynamicWorkflowsExperimentEnabled,
     isTranscriptCaughtUp,
     store,
   ]);
+
+  useEffect(() => {
+    if (!api) {
+      setPluginCommands([]);
+      return;
+    }
+
+    let cancelled = false;
+    void api.pluginCommands
+      .list()
+      .then((commands) => {
+        if (!cancelled) {
+          setPluginCommands(commands);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPluginCommands([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
   // Load agent skills for suggestions
   useEffect(() => {
@@ -2478,8 +2522,13 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
 
     // Route to creation handler for creation variant
     if (variant === "creation") {
-      const initialSlashCommand = parsed?.type === "goal-set" ? parsed : undefined;
-      if (!initialSlashCommand && parsed?.type !== "workflow-run") {
+      const initialSlashCommand =
+        parsed?.type === "goal-set" ||
+        parsed?.type === "unknown-command" ||
+        (parsed?.type === "workflow-run" && dynamicWorkflowsExperimentEnabled)
+          ? parsed
+          : undefined;
+      if (!initialSlashCommand) {
         const commandHandled = await executeParsedCommand(parsed, input);
         if (commandHandled) {
           return;
@@ -2930,20 +2979,6 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
         return;
       }
       voiceInput.toggle();
-      return;
-    }
-
-    // Space on empty input starts voice recording (ignore key repeat from holding)
-    if (
-      e.key === " " &&
-      !e.repeat &&
-      input.trim() === "" &&
-      voiceInput.shouldShowUI &&
-      voiceInput.isAvailable &&
-      voiceInput.state === "idle"
-    ) {
-      e.preventDefault();
-      voiceInput.start();
       return;
     }
 

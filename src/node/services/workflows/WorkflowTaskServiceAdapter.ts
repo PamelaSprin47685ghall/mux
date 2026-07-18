@@ -29,6 +29,7 @@ import {
 export const DEFAULT_WORKFLOW_AGENT_ID = "exec";
 
 interface WorkflowTaskExperiments {
+  [key: string]: unknown;
   programmaticToolCalling?: boolean;
   programmaticToolCallingExclusive?: boolean;
   advisorTool?: boolean;

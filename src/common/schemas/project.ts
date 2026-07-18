@@ -171,7 +171,14 @@ export const WorkspaceConfigSchema = z.object({
       advisorTool: z.boolean().optional(),
       dynamicWorkflows: z.boolean().optional(),
       execSubagentHardRestart: z.boolean().optional(),
+      subagentRole: z.string().optional(),
+      toolPolicy: z
+        .object({
+          disabledTools: z.array(z.string()).optional(),
+        })
+        .optional(),
     })
+    .passthrough()
     .optional()
     .meta({
       description: "Experiments inherited from parent for restart-safe resumptions.",

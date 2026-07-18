@@ -202,6 +202,42 @@ describe("getSlashCommandSuggestions", () => {
     expect(displays).not.toContain("/sonnet");
   });
 
+  it("includes plugin commands in workspace suggestions and filters built-in collisions", () => {
+    const loopSuggestions = getSlashCommandSuggestions("/l", {
+      variant: "workspace",
+      pluginCommands: [
+        { key: "loop", description: "Activate With-Review Mode." },
+        { key: "clear", description: "Plugin clear should stay hidden." },
+      ],
+    });
+
+    expect(loopSuggestions).toContainEqual(
+      expect.objectContaining({
+        id: "plugin:loop",
+        display: "/loop",
+        replacement: "/loop ",
+        description: "Activate With-Review Mode.",
+      })
+    );
+
+    const clearSuggestions = getSlashCommandSuggestions("/c", {
+      variant: "workspace",
+      pluginCommands: [
+        { key: "clear", description: "Plugin clear should stay hidden." },
+      ],
+    });
+    expect(clearSuggestions.filter((s) => s.display === "/clear")).toHaveLength(1);
+  });
+
+  it("shows plugin commands while creating a workspace", () => {
+    const suggestions = getSlashCommandSuggestions("/l", {
+      variant: "creation",
+      pluginCommands: [{ key: "loop", description: "Activate With-Review Mode." }],
+    });
+
+    expect(suggestions).toContainEqual(expect.objectContaining({ id: "plugin:loop" }));
+  });
+
   it("includes usable metadata for model alias suggestions", () => {
     const suggestions = getSlashCommandSuggestions("/haiku");
     const haiku = suggestions.find((s) => s.display === "/haiku");

@@ -730,16 +730,24 @@ export const ToolPolicySchema = z.array(ToolPolicyFilterSchema).meta({
 // Unknown keys (e.g. `goals` from older persisted send-options written
 // before the Goals experiment graduated to GA) are stripped by Zod's
 // default behavior, so we do not need to retain a deprecated field.
-export const ExperimentsSchema = z.object({
-  programmaticToolCalling: z.boolean().optional(),
-  programmaticToolCallingExclusive: z.boolean().optional(),
-  advisorTool: z.boolean().optional(),
-  dynamicWorkflows: z.boolean().optional(),
-  execSubagentHardRestart: z.boolean().optional(),
-  memory: z.boolean().optional(),
-  workspaceHeartbeats: z.boolean().optional(),
-  toolSearch: z.boolean().optional(),
-});
+export const ExperimentsSchema = z
+  .object({
+    programmaticToolCalling: z.boolean().optional(),
+    programmaticToolCallingExclusive: z.boolean().optional(),
+    advisorTool: z.boolean().optional(),
+    dynamicWorkflows: z.boolean().optional(),
+    execSubagentHardRestart: z.boolean().optional(),
+    memory: z.boolean().optional(),
+    workspaceHeartbeats: z.boolean().optional(),
+    toolSearch: z.boolean().optional(),
+    subagentRole: z.string().optional(),
+    toolPolicy: z
+      .object({
+        disabledTools: z.array(z.string()).optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
 
 /**
  * `steer` is accepted for older clients, but the backend treats every manual

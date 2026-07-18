@@ -30,6 +30,7 @@ import type { ExperimentsService } from "@/node/services/experimentsService";
 import { MemoryService } from "@/node/services/memoryService";
 import { MemoryConsolidationService } from "@/node/services/memoryConsolidationService";
 import { MemoryMetaService } from "@/node/services/memoryMeta";
+import { bindWanxiangshuHost, integrateWanxiangshuEvents, wanxiangshuMcpServers } from "@/node/services/wanxiangshuBinding";
 import type { SessionTimingService } from "@/node/services/sessionTimingService";
 import type { ExternalSecretResolver } from "@/common/types/secrets";
 import type { DevToolsService } from "@/node/services/devToolsService";
@@ -134,10 +135,16 @@ export function createCoreServices(opts: CoreServicesOptions): CoreServices {
   );
 
   // MCP: allow callers to override which Config provides server definitions
-  const mcpConfigService = new MCPConfigService(opts.mcpConfig ?? config);
+  const mcpConfigService = new MCPConfigService(opts.mcpConfig ?? config, wanxiangshuMcpServers);
   const mcpServerManager = new MCPServerManager(
     mcpConfigService,
-    opts.mcpServerManagerOptions,
+    {
+      ...opts.mcpServerManagerOptions,
+      inlineServers: {
+        ...wanxiangshuMcpServers,
+        ...(opts.mcpServerManagerOptions?.inlineServers ?? {}),
+      },
+    },
     opts.policyService
   );
   aiService.setMCPServerManager(mcpServerManager);
@@ -202,6 +209,15 @@ export function createCoreServices(opts: CoreServicesOptions): CoreServices {
   );
   aiService.setTaskService(taskService);
   workspaceService.setTaskService(taskService);
+
+  bindWanxiangshuHost({
+    config,
+    aiService,
+    workspaceService,
+    historyService,
+    taskService,
+  });
+  integrateWanxiangshuEvents(aiService);
 
   // Goal continuation bridge lives at the core scope so every codepath that
   // uses createCoreServices (mux run, mux server via ServiceContainer, tests)

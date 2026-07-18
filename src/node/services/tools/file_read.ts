@@ -18,7 +18,7 @@ export const createFileReadTool: ToolFactory = (config: ToolConfiguration) => {
     inputSchema: TOOL_DEFINITIONS.file_read.schema,
     execute: async (
       { path, offset, limit },
-      { abortSignal: _abortSignal }
+      _options?: { abortSignal?: AbortSignal }
     ): Promise<FileReadToolResult> => {
       // Note: abortSignal available but not used - file reads are fast and complete quickly
 

@@ -34,6 +34,7 @@ import {
 import { isAgentEffectivelyDisabled } from "@/node/services/agentDefinitions/agentEnablement";
 import { resolveAgentInheritanceChain } from "@/node/services/agentDefinitions/resolveAgentInheritanceChain";
 import { resolveToolPolicyForAgent } from "@/node/services/agentDefinitions/resolveToolPolicy";
+import { getWanxiangshuPluginToolPolicy } from "@/node/services/wanxiangshuBinding";
 import { log } from "./log";
 import { getTaskDepthFromConfig } from "./taskUtils";
 import { createAssistantMessageId } from "./utils/messageIds";
@@ -57,6 +58,8 @@ export interface ResolveAgentOptions {
   emitError: (event: ErrorEvent) => void;
   /** Whether the advisor-tool experiment is enabled (from ExperimentsService). */
   isAdvisorExperimentEnabled?: boolean;
+  /** wanxiangshu plugin sub-agent role for per-role tool policy narrowing. */
+  subagentRole?: string;
 }
 
 /** Result of agent resolution — all computed values needed by the stream pipeline. */
@@ -188,6 +191,7 @@ export async function resolveAgentForStream(
     cfg,
     emitError,
     isAdvisorExperimentEnabled,
+    subagentRole,
   } = opts;
 
   const workspaceLog = log.withFields({ workspaceId, workspaceName: metadata.name });
@@ -360,6 +364,7 @@ export async function resolveAgentForStream(
     isSubagent: isSubagentWorkspace,
     disableTaskToolsForDepth: shouldDisableTaskToolsForDepth,
     advisorEnabled,
+    pluginPolicies: getWanxiangshuPluginToolPolicy(effectiveAgentId, subagentRole),
   });
 
   // Caller require policies (e.g. task completion enforcement) must take precedence.

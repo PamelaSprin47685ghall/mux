@@ -269,6 +269,9 @@ export interface TaskCreateArgs {
     advisorTool?: boolean;
     execSubagentHardRestart?: boolean;
     dynamicWorkflows?: boolean;
+    subagentRole?: string;
+    toolPolicy?: { disabledTools?: string[] };
+    [key: string]: unknown;
   };
 }
 

@@ -608,6 +608,67 @@ describe("processSlashCommand - workflow", () => {
   });
 });
 
+describe("processSlashCommand - plugin commands", () => {
+  test("executes workspace plugin slash commands and forwards the returned message", async () => {
+    const execute = mock(() => Promise.resolve("Plugin generated message"));
+    const sendMessage = mock(() => Promise.resolve({ success: true }));
+    const context = createSlashCommandContext({
+      api: {
+        pluginCommands: { execute },
+        workspace: { sendMessage },
+      } as unknown as SlashCommandContext["api"],
+      workspaceId: "plugin-ws",
+      getInput: mock(() => "/loop-review investigate regression"),
+    });
+
+    const result = await processSlashCommand(
+      { type: "unknown-command", command: "loop-review" },
+      context
+    );
+
+    expect(execute).toHaveBeenCalledWith({
+      command: "loop-review",
+      workspaceId: "plugin-ws",
+      args: "investigate regression",
+      parentRuntimeMuxEnv: {
+        MUX_MODEL_STRING: "anthropic:claude-sonnet-4-6",
+        MUX_THINKING_LEVEL: "off",
+      },
+    });
+    expect(sendMessage).toHaveBeenCalledWith({
+      workspaceId: "plugin-ws",
+      message: "Plugin generated message",
+      options: context.sendMessageOptions,
+    });
+    expect(context.setInput).toHaveBeenCalledWith("");
+    expect(result).toEqual({ clearInput: true, toastShown: false });
+  });
+
+  test("shows an error toast when plugin command execution fails", async () => {
+    const execute = mock(() => Promise.reject(new Error("Plugin command failed")));
+    const sendMessage = mock(() => Promise.resolve({ success: true }));
+    const context = createSlashCommandContext({
+      api: {
+        pluginCommands: { execute },
+        workspace: { sendMessage },
+      } as unknown as SlashCommandContext["api"],
+      workspaceId: "plugin-ws",
+      getInput: mock(() => "/loop-review investigate regression"),
+    });
+
+    const result = await processSlashCommand(
+      { type: "unknown-command", command: "loop-review" },
+      context
+    );
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(context.setToast).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "error", message: "Plugin command failed" })
+    );
+    expect(result).toEqual({ clearInput: false, toastShown: true });
+  });
+});
+
 describe("processSlashCommand - side-question", () => {
   function createSideQuestionContext(
     sideQuestion: (input: {

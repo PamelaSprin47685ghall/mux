@@ -266,6 +266,8 @@ type MockOrpcWorkspaceClient = Pick<
 >;
 type MockOrpcWorkflowsClient = Pick<APIClient["workflows"], "start" | "getRun">;
 type MockOrpcNameGenerationClient = Pick<APIClient["nameGeneration"], "generate">;
+type PluginCommandsExecuteArgs = Parameters<APIClient["pluginCommands"]["execute"]>[0];
+type PluginCommandsExecuteResult = Awaited<ReturnType<APIClient["pluginCommands"]["execute"]>>;
 type WindowWithApi = Window & typeof globalThis;
 type WindowApi = WindowWithApi["api"];
 
@@ -286,6 +288,7 @@ interface MockOrpcClient {
   workspace: MockOrpcWorkspaceClient;
   workflows: MockOrpcWorkflowsClient;
   nameGeneration: MockOrpcNameGenerationClient;
+  pluginCommands: Pick<APIClient["pluginCommands"], "execute">;
 }
 interface SetupWindowOptions {
   listProjects?: ReturnType<typeof mock<() => Promise<ProjectListResult>>>;
@@ -317,6 +320,9 @@ interface SetupWindowOptions {
   nameGeneration?: ReturnType<
     typeof mock<(args: NameGenerationArgs) => Promise<NameGenerationResult>>
   >;
+  pluginCommandExecute?: ReturnType<
+    typeof mock<(args: PluginCommandsExecuteArgs) => Promise<PluginCommandsExecuteResult>>
+  >;
 }
 
 const setupWindow = ({
@@ -331,6 +337,7 @@ const setupWindow = ({
   workflowStart,
   workflowGetRun,
   nameGeneration,
+  pluginCommandExecute,
 }: SetupWindowOptions = {}) => {
   // Sync the useProjectContext mock with the default trusted config.
   // Tests that need untrusted projects override mockProjectConfigMap directly.
@@ -446,6 +453,12 @@ const setupWindow = ({
       } as NameGenerationResult);
     });
 
+  const pluginCommandExecuteMock =
+    pluginCommandExecute ??
+    mock<(args: PluginCommandsExecuteArgs) => Promise<PluginCommandsExecuteResult>>(() => {
+      return Promise.resolve(null as PluginCommandsExecuteResult);
+    });
+
   currentORPCClient = {
     projects: {
       list: () => listProjectsMock(),
@@ -475,6 +488,9 @@ const setupWindow = ({
     },
     nameGeneration: {
       generate: (input: NameGenerationArgs) => nameGenerationMock(input),
+    },
+    pluginCommands: {
+      execute: (input: PluginCommandsExecuteArgs) => pluginCommandExecuteMock(input),
     },
   };
 
@@ -586,6 +602,7 @@ const setupWindow = ({
     },
     workflowsApi: { start: workflowStartMock, getRun: workflowGetRunMock },
     nameGenerationApi: { generate: nameGenerationMock },
+    pluginCommandsApi: { execute: pluginCommandExecuteMock },
   };
 };
 const TEST_METADATA: FrontendWorkspaceMetadata = {
@@ -945,7 +962,7 @@ describe("useCreationWorkspace", () => {
     });
     expect(onWorkspaceCreated.mock.calls[0][1]).toEqual({
       autoNavigate: true,
-      pendingStreamModel: "anthropic:claude-opus-4-8",
+      pendingStreamModel: "gpt-4",
       markPendingInitialSend: false,
     });
   });
@@ -984,6 +1001,57 @@ describe("useCreationWorkspace", () => {
         message: "/deep-research mux workflows",
       })
     );
+  });
+
+  test("handleSend creates workspace and routes initial /loop through plugin commands", async () => {
+    const pluginCommandExecuteMock = mock(
+      (_args: PluginCommandsExecuteArgs): Promise<PluginCommandsExecuteResult> =>
+        Promise.resolve("---\ntask: |\n  Clarify rollout plan\n---\n\nWith-Review Mode is active.")
+    );
+    const sendMessageMock = mock(
+      (_args: WorkspaceSendMessageArgs): Promise<WorkspaceSendMessageResult> =>
+        Promise.resolve({ success: true, data: {} } as WorkspaceSendMessageResult)
+    );
+    const { workspaceApi, pluginCommandsApi } = setupWindow({
+      pluginCommandExecute: pluginCommandExecuteMock,
+      sendMessage: sendMessageMock,
+    });
+
+    const onWorkspaceCreated = mock((metadata: FrontendWorkspaceMetadata) => metadata);
+    const getHook = renderUseCreationWorkspace({
+      projectPath: TEST_PROJECT_PATH,
+      onWorkspaceCreated,
+      message: "/loop Clarify rollout plan",
+    });
+
+    await waitFor(() => expect(getHook().branches).toEqual([FALLBACK_BRANCH]));
+
+    let handleSendResult: CreationSendResult | undefined;
+    await act(async () => {
+      handleSendResult = await getHook().handleSend(
+        "/loop Clarify rollout plan",
+        undefined,
+        undefined,
+        { type: "unknown-command", command: "loop", subcommand: "Clarify rollout plan" }
+      );
+    });
+
+    expect(handleSendResult).toEqual({ success: true });
+    expect(workspaceApi.create.mock.calls.length).toBe(1);
+    expect(pluginCommandsApi.execute).toHaveBeenCalledWith({
+      command: "loop",
+      workspaceId: TEST_WORKSPACE_ID,
+      args: "Clarify rollout plan",
+      parentRuntimeMuxEnv: {
+        MUX_MODEL_STRING: "gpt-4",
+        MUX_THINKING_LEVEL: "medium",
+      },
+    });
+    expect(workspaceApi.sendMessage.mock.calls.length).toBe(1);
+    const sendInput = workspaceApi.sendMessage.mock.calls[0]?.[0];
+    expect(sendInput?.message).toContain("task: |");
+    expect(sendInput?.message).toContain("Clarify rollout plan");
+    expect(sendInput?.message).not.toContain("/loop Clarify rollout plan");
   });
 
   test("handleSend uses a deterministic workspace name when AI name generation fails", async () => {
@@ -1423,7 +1491,7 @@ describe("useCreationWorkspace", () => {
     expect(onWorkspaceCreated.mock.calls.length).toBe(1);
     expect(onWorkspaceCreated.mock.calls[0][1]).toEqual({
       autoNavigate: true,
-      pendingStreamModel: "anthropic:claude-opus-4-8",
+      pendingStreamModel: "gpt-4",
       markPendingInitialSend: true,
     });
   });

@@ -17,6 +17,10 @@ interface ToolExecutionContext {
   toolCallId?: string;
 }
 
+interface ToolConcurrencyHint {
+  __allowConcurrent?: boolean;
+}
+
 function getAbortSignal(options: unknown): AbortSignal | undefined {
   if (typeof options !== "object" || options === null) {
     return undefined;
@@ -212,6 +216,9 @@ class SharedExecutionLock {
  * `onExecutionStart` fires right after the execution lock is acquired (i.e.
  * when the tool actually starts running, not when the model emitted the call),
  * so queued siblings don't count wait time as execution time.
+ * Tools may opt out of the per-stream mutex via `__allowConcurrent`. We scope
+ * the mutex to the returned tool map so independent streams still execute
+ * concurrently, while tools that mutate shared stream state remain ordered.
  */
 export function withSequentialExecution(
   tools: Record<string, Tool> | undefined,
@@ -240,8 +247,13 @@ export function withSequentialExecution(
     ) => unknown;
     const wrappedTool = cloneToolPreservingDescriptors(baseTool);
     const wrappedToolRecord = wrappedTool as Record<string, unknown>;
+    const allowConcurrent = (baseTool as ToolConcurrencyHint).__allowConcurrent === true;
 
     wrappedToolRecord.execute = async (args: unknown, options: unknown) => {
+      if (allowConcurrent) {
+        return await executeFn.call(baseTool, args, options);
+      }
+
       const abortSignal = getAbortSignal(options);
       await using _lock = canRunWithSiblingExploreTasks(baseTool, args)
         ? await executionLock.acquireRead(abortSignal)

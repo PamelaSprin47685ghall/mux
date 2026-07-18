@@ -150,6 +150,33 @@ export const experiments = {
     output: z.void(),
   },
 };
+export const PluginSlashCommandSchema = z.object({
+  key: z.string(),
+  description: z.string(),
+  inputHint: z.string().optional(),
+});
+
+export const pluginCommands = {
+  list: {
+    input: z.void(),
+    output: z.array(PluginSlashCommandSchema),
+  },
+  execute: {
+    input: z.object({
+      command: z.string(),
+      workspaceId: z.string(),
+      args: z.string(),
+      parentRuntimeMuxEnv: z
+        .object({
+          MUX_MODEL_STRING: z.string().optional(),
+          MUX_THINKING_LEVEL: z.string().optional(),
+        })
+        .optional(),
+    }),
+    output: z.string().nullable(),
+  },
+};
+
 // Re-export telemetry schemas
 export { telemetry, TelemetryEventSchema } from "./telemetry";
 

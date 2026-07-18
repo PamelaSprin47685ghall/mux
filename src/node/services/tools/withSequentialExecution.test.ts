@@ -10,6 +10,10 @@ interface Deferred<T> {
   reject: (reason?: unknown) => void;
 }
 
+type ConcurrentTool<TTool extends object> = TTool & {
+  __allowConcurrent?: boolean;
+};
+
 function createDeferred<T>(): Deferred<T> {
   let resolve: Deferred<T>["resolve"] | undefined;
   let reject: Deferred<T>["reject"] | undefined;
@@ -37,6 +41,12 @@ function callWrappedExecute(
 
   const invoke = execute as (args: unknown, options: unknown) => unknown;
   return Promise.resolve(invoke(args, options));
+}
+
+function markConcurrent<TTool extends object>(toolDefinition: TTool): ConcurrentTool<TTool> {
+  const concurrentTool = toolDefinition as ConcurrentTool<TTool>;
+  concurrentTool.__allowConcurrent = true;
+  return concurrentTool;
 }
 
 describe("withSequentialExecution", () => {
@@ -166,6 +176,61 @@ describe("withSequentialExecution", () => {
     releaseA.resolve();
     await resultsPromise;
     expect(events).toEqual(["execution-start call-a", "run A", "execution-start call-b", "run B"]);
+  });
+
+  test("allows explicitly concurrent tools to execute in parallel", async () => {
+    const executionLog: string[] = [];
+    const started = {
+      a: createDeferred<void>(),
+      b: createDeferred<void>(),
+    };
+    const release = {
+      a: createDeferred<void>(),
+      b: createDeferred<void>(),
+    };
+
+    const toolA = markConcurrent(tool({
+      description: "Tool A",
+      inputSchema: z.object({}),
+      execute: async () => {
+        executionLog.push("start A");
+        started.a.resolve();
+        await release.a.promise;
+        executionLog.push("end A");
+        return { tool: "A" };
+      },
+    }));
+
+    const toolB = markConcurrent(tool({
+      description: "Tool B",
+      inputSchema: z.object({}),
+      execute: async () => {
+        executionLog.push("start B");
+        started.b.resolve();
+        await release.b.promise;
+        executionLog.push("end B");
+        return { tool: "B" };
+      },
+    }));
+
+    const wrappedTools = withSequentialExecution({ a: toolA, b: toolB });
+    expect(wrappedTools).toBeDefined();
+
+    const resultsPromise = Promise.all([
+      wrappedTools!.a.execute!({}, {} as never),
+      wrappedTools!.b.execute!({}, {} as never),
+    ]);
+
+    await Promise.all([started.a.promise, started.b.promise]);
+    await Promise.resolve();
+    expect(executionLog).toEqual(["start A", "start B"]);
+
+    release.a.resolve();
+    release.b.resolve();
+
+    const results = await resultsPromise;
+    expect(results).toEqual([{ tool: "A" }, { tool: "B" }]);
+    expect(executionLog).toEqual(["start A", "start B", "end A", "end B"]);
   });
 
   test("does not execute queued siblings after stream abort", async () => {

@@ -606,11 +606,13 @@ function stripLegacyWorkspaceWorkflowSchedule(
   return nextWorkspace;
 }
 
-function normalizeProjectRuntimeSettings(projectConfig: ProjectConfig): ProjectConfig {
+function normalizeProjectRuntimeSettings(
+  projectConfig: ProjectConfig
+): { projectConfig: ProjectConfig; modified: boolean } {
   // Per-project runtime overrides are optional; keep config.json sparse by persisting only explicit
   // overrides (false enablement + explicit default runtime selections).
   if (!projectConfig || typeof projectConfig !== "object") {
-    return { workspaces: [] };
+    return { projectConfig: { workspaces: [] }, modified: true };
   }
 
   const record = projectConfig as ProjectConfig & {
@@ -619,11 +621,27 @@ function normalizeProjectRuntimeSettings(projectConfig: ProjectConfig): ProjectC
     runtimeOverridesEnabled?: unknown;
     projectKind?: unknown;
   };
+  let modified = false;
   const runtimeEnablement = normalizeRuntimeEnablementOverrides(record.runtimeEnablement);
   const defaultRuntime = normalizeRuntimeEnablementId(record.defaultRuntime);
   const runtimeOverridesEnabled = record.runtimeOverridesEnabled === true ? true : undefined;
 
-  const next = { ...record };
+  const workspaces = Array.isArray(record.workspaces)
+    ? record.workspaces.map((workspace) => {
+        const nextWorkspace =
+          workspace && typeof workspace === "object" ? { ...workspace } : workspace;
+        if (nextWorkspace && typeof nextWorkspace === "object") {
+          if (nextWorkspace.taskExperiments === null) {
+            modified = true;
+            delete nextWorkspace.taskExperiments;
+          }
+          return stripLegacyWorkspaceWorkflowSchedule(nextWorkspace);
+        }
+        return workspace;
+      })
+    : [];
+
+  const next = { ...record, workspaces };
   delete (next as ProjectConfig & { sections?: unknown }).sections;
   if (runtimeEnablement) {
     next.runtimeEnablement = runtimeEnablement;
@@ -643,9 +661,6 @@ function normalizeProjectRuntimeSettings(projectConfig: ProjectConfig): ProjectC
     delete next.defaultRuntime;
   }
 
-  const workspaces = Array.isArray(record.workspaces) ? record.workspaces : [];
-  next.workspaces = workspaces.map(stripLegacyWorkspaceWorkflowSchedule);
-
   const projectKind = normalizeProjectKind(record.projectKind);
   if (projectKind !== undefined) {
     next.projectKind = projectKind;
@@ -657,7 +672,7 @@ function normalizeProjectRuntimeSettings(projectConfig: ProjectConfig): ProjectC
   // scheduling is disabled during the explicit script_path migration.
   delete (next as ProjectConfig & { workflowSchedules?: unknown }).workflowSchedules;
 
-  return next;
+  return { projectConfig: next, modified };
 }
 /**
  * Config - Centralized configuration management
@@ -723,6 +738,7 @@ export class Config {
         const data = fs.readFileSync(this.configFile, "utf-8");
         const parsed = JSON.parse(data) as Partial<AppConfigOnDisk> & Record<string, unknown>;
         let configModified = false;
+        let projectsModified = false;
         let shouldInvalidateSessionUsageCaches = false;
 
         const normalizeNestedModelStrings = (value: unknown): boolean => {
@@ -876,13 +892,21 @@ export class Config {
           .filter(([projectPath]) => {
             if (!projectPath || typeof projectPath !== "string") {
               log.warn("Filtering out project with invalid path", { projectPath });
+              projectsModified = true;
+              configModified = true;
               return false;
             }
             return true;
           })
           .map(([projectPath, projectConfig]) => {
-            const normalizedProjectConfig = normalizeProjectRuntimeSettings(projectConfig);
-            return [stripTrailingSlashes(projectPath), normalizedProjectConfig] as [
+            const normalizedProjectPath = stripTrailingSlashes(projectPath);
+            const { projectConfig: normalizedProjectConfig, modified } =
+              normalizeProjectRuntimeSettings(projectConfig);
+            if (normalizedProjectPath !== projectPath || modified) {
+              projectsModified = true;
+              configModified = true;
+            }
+            return [normalizedProjectPath, normalizedProjectConfig] as [
               string,
               ProjectConfig,
             ];
@@ -905,7 +929,12 @@ export class Config {
             }))
           );
           projectConfig.workspaces = [];
+          projectsModified = true;
           configModified = true;
+        }
+
+        if (projectsModified) {
+          parsed.projects = Array.from(projectsMap.entries());
         }
 
         const taskSettings = normalizeTaskSettings(parsed.taskSettings);
@@ -1173,10 +1202,10 @@ export class Config {
       const data: Partial<Record<keyof AppConfigOnDisk, unknown>> & {
         projects: Array<[string, ProjectConfig]>;
       } = {
-        projects: Array.from(config.projects.entries()).map(
-          ([projectPath, projectConfig]) =>
-            [projectPath, normalizeProjectRuntimeSettings(projectConfig)] as [string, ProjectConfig]
-        ),
+      projects: Array.from(config.projects.entries()).map(([projectPath, projectConfig]) => {
+        const { projectConfig: normalizedProjectConfig } = normalizeProjectRuntimeSettings(projectConfig);
+        return [projectPath, normalizedProjectConfig] as [string, ProjectConfig];
+      }),
         taskSettings: config.taskSettings ?? DEFAULT_TASK_SETTINGS,
       };
 

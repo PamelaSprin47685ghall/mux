@@ -8,6 +8,7 @@ import type { WorkspaceMetadata } from "@/common/types/workspace";
 import { DEFAULT_RUNTIME_CONFIG } from "@/common/constants/workspace";
 import { LocalRuntime } from "@/node/runtime/LocalRuntime";
 import { DisposableTempDir } from "@/node/services/tempDir";
+import { applyToolPolicyToNames } from "@/common/utils/tools/toolPolicy";
 import { getLegacyModeForAgentMetadata, resolveAgentForStream } from "./agentResolution";
 
 const PARENT_WORKSPACE_ID = "parent-workspace";
@@ -28,6 +29,64 @@ function createSubagentMetadata(params: {
     agentId: params.agentId,
     agentType: params.agentType ?? params.agentId,
   };
+}
+
+function isToolEnabledInEffectiveToolPolicy(
+  policy: Awaited<ReturnType<typeof resolvePolicyForAgent>>,
+  toolName: string
+): boolean {
+  return applyToolPolicyToNames([toolName], policy).includes(toolName);
+}
+
+async function resolveExploreChildPolicy(subagentRole?: string) {
+  using tempDir = new DisposableTempDir("agent-resolution-subagent-role");
+  const projectPath = path.join(tempDir.path, "project");
+  await fs.mkdir(projectPath, { recursive: true });
+
+  const metadata = createSubagentMetadata({
+    projectPath,
+    agentId: "explore",
+  });
+  const cfg: ProjectsConfig = {
+    projects: new Map([
+      [
+        projectPath,
+        {
+          trusted: true,
+          workspaces: [
+            { id: PARENT_WORKSPACE_ID, name: PARENT_WORKSPACE_ID, path: projectPath },
+            {
+              id: CHILD_WORKSPACE_ID,
+              name: CHILD_WORKSPACE_ID,
+              path: projectPath,
+              parentWorkspaceId: PARENT_WORKSPACE_ID,
+              agentId: "explore",
+              agentType: "explore",
+            },
+          ],
+        },
+      ],
+    ]),
+  };
+
+  const result = await resolveAgentForStream({
+    workspaceId: CHILD_WORKSPACE_ID,
+    metadata,
+    runtime: new LocalRuntime(projectPath),
+    workspacePath: projectPath,
+    requestedAgentId: "explore",
+    disableWorkspaceAgents: false,
+    callerToolPolicy: undefined,
+    cfg,
+    emitError: () => undefined,
+    isAdvisorExperimentEnabled: false,
+    subagentRole,
+  });
+
+  if (!result.success) {
+    throw new Error("Expected agent resolution to succeed");
+  }
+  return result.data.effectiveToolPolicy ?? [];
 }
 
 async function resolvePolicyForAgent(params: {
@@ -469,6 +528,64 @@ describe("resolveAgentForStream agent identity", () => {
     expect(result.data.agentDefinition.scope).toBe("project");
     expect(result.data.agentDefinition.frontmatter.name).toBe("Child Exec Override");
     expect(result.data.effectiveMode).toBe("plan");
+  });
+});
+
+describe("subagentRole plugin tool policy", () => {
+  test("investigator role disables coder, bash, edits, web, and keeps read plus executor", async () => {
+    const policy = await resolveExploreChildPolicy("investigator");
+
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "coder")).toBe(false);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "bash")).toBe(false);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "file_edit_insert")).toBe(false);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "web_search")).toBe(false);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "read")).toBe(true);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "executor")).toBe(true);
+  });
+
+  test("coder role disables investigator, bash, web, and question while keeping edits", async () => {
+    const policy = await resolveExploreChildPolicy("coder");
+
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "investigator")).toBe(false);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "bash")).toBe(false);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "web_search")).toBe(false);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "ask_user_question")).toBe(false);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "file_edit_insert")).toBe(true);
+  });
+
+  test("meditator role has no read, bash, edit, web, or stealth tools on explore child", async () => {
+    const policy = await resolveExploreChildPolicy("meditator");
+
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "read")).toBe(false);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "bash")).toBe(false);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "file_edit_insert")).toBe(false);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "web_search")).toBe(false);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "stealth_browser_mcp_open_url")).toBe(false);
+  });
+
+  test("browser role keeps stealth MCP and read but disables bash, edits, and web", async () => {
+    const policy = await resolveExploreChildPolicy("browser");
+
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "read")).toBe(true);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "stealth_browser_mcp_open_url")).toBe(true);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "bash")).toBe(false);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "file_edit_insert")).toBe(false);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "web_search")).toBe(false);
+  });
+
+  test("reviewer role is read-only on explore child", async () => {
+    const policy = await resolveExploreChildPolicy("reviewer");
+
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "read")).toBe(true);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "bash")).toBe(false);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "file_edit_insert")).toBe(false);
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "stealth_browser_mcp_open_url")).toBe(false);
+  });
+
+  test("without subagentRole uses orchestrator plugin policy so coder stays enabled", async () => {
+    const policy = await resolveExploreChildPolicy(undefined);
+
+    expect(isToolEnabledInEffectiveToolPolicy(policy, "coder")).toBe(true);
   });
 });
 

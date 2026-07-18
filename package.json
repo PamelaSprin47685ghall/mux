@@ -21,6 +21,8 @@
     "dev": "make dev",
     "prebuild:main": "./scripts/generate-version.sh",
     "build": "make build",
+    "prepack": "node scripts/prepare-npm-package.mjs prepare",
+    "postpack": "node scripts/prepare-npm-package.mjs restore",
     "start": "make start",
     "typecheck": "make typecheck",
     "debug": "bun src/cli/debug/index.ts",
@@ -146,7 +148,8 @@
     "xxhash-wasm": "^1.1.0",
     "yaml": "^2.8.2",
     "zod": "^4.1.11",
-    "zod-to-json-schema": "^3.24.6"
+    "zod-to-json-schema": "^3.24.6",
+    "wanxiangshu": "file:../wanxiangshu"
   },
   "devDependencies": {
     "@babel/core": "^7.28.5",

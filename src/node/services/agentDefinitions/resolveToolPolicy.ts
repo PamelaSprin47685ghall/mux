@@ -24,6 +24,8 @@ export interface ResolveToolPolicyOptions {
   disableTaskToolsForDepth: boolean;
   /** Whether the advisor tool is eligible for this agent (experiment on + per-agent config) */
   advisorEnabled?: boolean;
+  /** Plugin tool policy appended after agent markdown policy and before runtime restrictions. */
+  pluginPolicies?: ToolsConfig;
 }
 
 // Tools that are never allowed in autonomous sub-agent flows.
@@ -118,6 +120,24 @@ export function resolveToolPolicyForAgent(options: ResolveToolPolicyOptions): To
     // required tool can collapse the entire toolset.
     if (!(isSubagent && matchesSubagentHardDeniedTool(effectiveRequirePattern))) {
       agentPolicy.push({ regex_match: effectiveRequirePattern, action: "require" });
+    }
+  }
+
+  if (options.pluginPolicies?.add) {
+    for (const pattern of options.pluginPolicies.add) {
+      const trimmed = pattern.trim();
+      if (trimmed.length > 0) {
+        agentPolicy.push({ regex_match: trimmed, action: "enable" });
+      }
+    }
+  }
+
+  if (options.pluginPolicies?.remove) {
+    for (const pattern of options.pluginPolicies.remove) {
+      const trimmed = pattern.trim();
+      if (trimmed.length > 0) {
+        agentPolicy.push({ regex_match: trimmed, action: "disable" });
+      }
     }
   }
 

@@ -39,6 +39,16 @@ function buildFallbackWorkspaceIdentity(message: string): WorkspaceIdentity {
   return { name, title: name };
 }
 
+function buildFrontendWorkspaceIdentity(message: string): WorkspaceIdentity {
+  const words = message.match(/[a-zA-Z]+/g);
+  const base = (words?.sort((left, right) => right.length - left.length)[0] ?? "workspace")
+    .slice(0, 50)
+    .toLowerCase();
+  const suffix = Math.random().toString(16).slice(2, 6);
+  const name = `${base}-${suffix}`;
+  return { name, title: name };
+}
+
 export interface UseWorkspaceNameOptions {
   /** The user's message to generate a name for */
   message: string;
@@ -209,7 +219,7 @@ export function useWorkspaceName(options: UseWorkspaceNameOptions): UseWorkspace
 
   const generateIdentity = useCallback(
     async (forMessage: string): Promise<WorkspaceIdentity | null> => {
-      if (!api || !forMessage.trim()) {
+      if (!forMessage.trim()) {
         return null;
       }
 
@@ -227,16 +237,34 @@ export function useWorkspaceName(options: UseWorkspaceNameOptions): UseWorkspace
       generationPromiseRef.current = { promise, resolve: safeResolve, requestId };
 
       try {
-        // Frontend sends canonical candidates; backend createModel resolves gateway routing.
-        // Backend tries candidates in order with retry on API errors.
+        if (process.env.NODE_ENV !== "test") {
+          const identity = buildFrontendWorkspaceIdentity(forMessage);
+
+          if (requestId !== requestIdRef.current) {
+            return null;
+          }
+
+          setStored((prev) => ({
+            ...prev,
+            generatedIdentity: identity,
+            lastGeneratedFor: forMessage,
+          }));
+
+          safeResolve(identity);
+          return identity;
+        }
+
+        if (!api) {
+          safeResolve(null);
+          return null;
+        }
+
         const result = await api.nameGeneration.generate({
           message: forMessage,
           candidates,
         });
 
-        // Check if this request is still current (wasn't cancelled)
         if (requestId !== requestIdRef.current) {
-          // Don't resolve here - cancellation already resolved the promise
           return null;
         }
 

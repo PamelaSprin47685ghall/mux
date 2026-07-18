@@ -1,6 +1,7 @@
 import { os, ORPCError } from "@orpc/server";
 import { DEFAULT_CODER_ARCHIVE_BEHAVIOR } from "@/common/config/coderArchiveBehavior";
 import * as schemas from "@/common/orpc/schemas";
+import { pluginCommands } from "@/common/orpc/schemas/api";
 import { EXPERIMENT_IDS } from "@/common/constants/experiments";
 import type { ORPCContext } from "./context";
 import { OnePasswordService } from "@/node/services/onePasswordService";
@@ -40,6 +41,10 @@ import type { LogEntry } from "@/node/services/logBuffer";
 import { clearLogEntries, subscribeLogFeed } from "@/node/services/logBuffer";
 import { createReplayBufferedStreamMessageRelay } from "./replayBufferedStreamMessageRelay";
 
+import {
+  executeWanxiangshuSlashCommand,
+  wanxiangshuSlashCommands,
+} from "@/node/services/wanxiangshuBinding";
 import { createRuntime, checkRuntimeAvailability } from "@/node/runtime/runtimeFactory";
 import {
   appendSubProjectRelativePath,
@@ -5896,6 +5901,29 @@ export const router = (authToken?: string) => {
         .handler(async ({ context, input }) => {
           return context.voiceService.transcribe(input.audioBase64);
         }),
+    },
+    pluginCommands: {
+      list: t
+        .input(pluginCommands.list.input)
+        .output(pluginCommands.list.output)
+        .handler(() =>
+          wanxiangshuSlashCommands.map(({ key, description, inputHint }) => ({
+            key,
+            description,
+            ...(inputHint == null ? {} : { inputHint }),
+          }))
+        ),
+      execute: t
+        .input(pluginCommands.execute.input)
+        .output(pluginCommands.execute.output)
+        .handler(async ({ input }) =>
+          executeWanxiangshuSlashCommand(
+            input.command,
+            input.workspaceId,
+            input.args,
+            input.parentRuntimeMuxEnv
+          )
+        ),
     },
     experiments: {
       getAll: t

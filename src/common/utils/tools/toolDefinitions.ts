@@ -3040,7 +3040,7 @@ export function getAvailableTools(
     "agent_skill_read_file",
     "file_edit_replace_string",
     // "file_edit_replace_lines", // DISABLED: causes models to break repo state
-    "file_edit_insert",
+    // "file_edit_insert", // DISABLED: p1-no-insert
     ...(enableMemory ? ["memory"] : []),
     ...(enableAdvisor ? ["advisor"] : []),
     ...(enableToolSearch ? ["tool_catalog_search"] : []),

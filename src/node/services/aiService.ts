@@ -64,7 +64,7 @@ import type { PostCompactionAttachment } from "@/common/types/attachment";
 import type { HistoryService } from "./historyService";
 import { delegatedToolCallManager } from "./delegatedToolCallManager";
 import { createErrorEvent, formatSendMessageError } from "./utils/sendMessageError";
-import { resolveWorkspaceModelFallbackChain } from "@/node/services/taskUtils";
+import { findWorkspaceEntry, resolveWorkspaceModelFallbackChain } from "@/node/services/taskUtils";
 import { createAssistantMessageId } from "./utils/messageIds";
 import type { SessionUsageService } from "./sessionUsageService";
 import { sumUsageHistory, getTotalCost } from "@/common/utils/tokens/usageAggregator";
@@ -1439,17 +1439,25 @@ export class AIService extends EventEmitter {
 
       // Resolve agent definition, compute effective mode & tool policy.
       const cfg = this.config.loadConfigOrDefault();
+      const persistedTaskExperiments = findWorkspaceEntry(cfg, workspaceId)?.workspace.taskExperiments;
+      const streamExperiments = experiments ?? persistedTaskExperiments;
       const advisorExperimentEnabled =
-        experiments?.advisorTool ??
+        (typeof streamExperiments?.advisorTool === "boolean"
+          ? streamExperiments.advisorTool
+          : undefined) ??
         this.experimentsService?.isExperimentEnabled(EXPERIMENT_IDS.ADVISOR_TOOL) === true;
       const dynamicWorkflowsExperimentEnabled =
-        experiments?.dynamicWorkflows ??
+        (typeof streamExperiments?.dynamicWorkflows === "boolean"
+          ? streamExperiments.dynamicWorkflows
+          : undefined) ??
         this.experimentsService?.isExperimentEnabled(EXPERIMENT_IDS.DYNAMIC_WORKFLOWS) === true;
       const memoryExperimentEnabled =
-        experiments?.memory ??
+        (typeof streamExperiments?.memory === "boolean" ? streamExperiments.memory : undefined) ??
         this.experimentsService?.isExperimentEnabled(EXPERIMENT_IDS.MEMORY) === true;
       const workspaceHeartbeatsExperimentEnabled =
-        experiments?.workspaceHeartbeats ??
+        (typeof streamExperiments?.workspaceHeartbeats === "boolean"
+          ? streamExperiments.workspaceHeartbeats
+          : undefined) ??
         this.experimentsService?.isExperimentEnabled(EXPERIMENT_IDS.WORKSPACE_HEARTBEATS) === true;
       const toolSearchExperimentEnabled =
         experiments?.toolSearch ??
@@ -1487,6 +1495,7 @@ export class AIService extends EventEmitter {
         cfg,
         emitError: (event) => this.emit("error", event),
         isAdvisorExperimentEnabled: advisorExperimentEnabled,
+        subagentRole: typeof streamExperiments?.subagentRole === "string" ? streamExperiments.subagentRole : undefined,
       });
       recordStartupPhaseTiming("resolveAgentForStreamMs", resolveAgentForStreamStartedAt);
       if (!agentResult.success) {
@@ -1900,7 +1909,7 @@ export class AIService extends EventEmitter {
                   },
                   getProjectTrusted: getWorkflowProjectTrusted,
                   experiments: {
-                    ...experiments,
+                    ...(streamExperiments ?? {}),
                     dynamicWorkflows: dynamicWorkflowsExperimentEnabled,
                     workspaceHeartbeats: workspaceHeartbeatsExperimentEnabled,
                   },
@@ -1976,7 +1985,7 @@ export class AIService extends EventEmitter {
                       maxOutputTokens,
                       providerOptions: effectiveMuxProviderOptions,
                       experiments: {
-                        ...experiments,
+                        ...(streamExperiments ?? {}),
                         dynamicWorkflows: dynamicWorkflowsExperimentEnabled,
                         workspaceHeartbeats: workspaceHeartbeatsExperimentEnabled,
                       },
@@ -2747,7 +2756,7 @@ export class AIService extends EventEmitter {
                     ),
                     extraTools: this.extraTools,
                     effectiveToolPolicy,
-                    experiments,
+                    experiments: streamExperiments,
                     emitNestedToolEvent: emitNestedPtcToolEvent,
                   });
                   // Tool search: keep the per-stream state consistent with the
