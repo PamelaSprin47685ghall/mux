@@ -150,3 +150,7 @@ dogfood-output/
 .design-sync/node_modules
 .ds-sync/
 ds-bundle/
+
+# Local Mux session data
+/.wanxiangshu.ndjson
+/mux-e2e-session
