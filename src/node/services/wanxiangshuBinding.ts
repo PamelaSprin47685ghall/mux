@@ -680,7 +680,7 @@ export async function runWanxiangshuSystemTransform(input: {
     return input as SystemTransformResult;
   }
   const output = { system: input.system ?? null };
-  await (hook as (i: unknown, o: typeof output) => Promise<void>)({}, output);
+  await (hook as (i: unknown, o: typeof output) => Promise<void>)({ workspacePath: boundConfig?.rootDir ?? "" }, output);
   return (output.system ? output : {}) as SystemTransformResult;
 }
 
